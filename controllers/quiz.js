@@ -1,27 +1,39 @@
-const models = require("../models");
+const Sequelize = require("sequelize");
+const {models} = require("../models");
+
+// Autoload the quiz with id equals to :quizId
+exports.load = (req, res, next, quizId) => {
+
+    models.quiz.findById(quizId)
+    .then(quiz => {
+        if (quiz) {   
+            req.quiz = quiz;
+            next();
+        } else {
+            throw new Error('There is no quiz with id=' + quizId);
+        }
+    })
+    .catch(error => next(error));
+};
 
 
 // GET /quizzes
 exports.index = (req, res, next) => {
 
-    const quizzes = models.quiz.findAll();
-
-    res.render('quizzes/index.ejs', {quizzes});
+    models.quiz.findAll()
+    .then(quizzes => {
+        res.render('quizzes/index.ejs', {quizzes});
+    })
+    .catch(error => next(error));
 };
 
 
 // GET /quizzes/:quizId
 exports.show = (req, res, next) => {
 
-    const quizId = Number(req.params.quizId);
+    const {quiz} = req;
 
-    const quiz = models.quiz.findById(quizId);
-
-    if (quiz) {
-        res.render('quizzes/show', {quiz});
-    } else {
-        next(new Error('There is no quiz with id=' + quizId));
-    }
+    res.render('quizzes/show', {quiz});
 };
 
 
@@ -39,114 +51,164 @@ exports.new = (req, res, next) => {
 // POST /quizzes/create
 exports.create = (req, res, next) => {
 
-    let quiz = {
-        question: req.body.question,
-        answer: req.body.answer
-    };
+    const {question, answer} = req.body;
 
-    // Validates that they are no empty
-    if (!quiz.question || !quiz.answer) {
+    const quiz = models.quiz.build({
+        question,
+        answer
+    });
+
+    // Saves only the fields question and answer into the DDBB
+    quiz.save({fields: ["question", "answer"]})
+    .then(quiz => {
+        req.flash('success', 'Quiz created successfully.');
+        res.redirect('/quizzes/' + quiz.id);
+    })
+    .catch(Sequelize.ValidationError, error => {
+        req.flash('error', 'There are errors in the form:');
+        error.errors.forEach(({message}) => req.flash('error', message));
         res.render('quizzes/new', {quiz});
-        return;
-    }
-
-    // Saves the new quiz
-    quiz = models.quiz.create(quiz);
-
-    res.redirect('/quizzes/' + quiz.id);
+    })
+    .catch(error => {
+        req.flash('error', 'Error creating a new Quiz: ' + error.message);
+        next(error);
+    });
 };
 
 
 // GET /quizzes/:quizId/edit
 exports.edit = (req, res, next) => {
 
-    const quizId = Number(req.params.quizId);
+    const {quiz} = req;
 
-    const quiz = models.quiz.findById(quizId);
-
-    if (quiz) {
-        res.render('quizzes/edit', {quiz});
-    } else {
-        next(new Error('There is no quiz with id=' + quizId));
-    }
+    res.render('quizzes/edit', {quiz});
 };
 
 
 // PUT /quizzes/:quizId
 exports.update = (req, res, next) => {
 
-    const quizId = Number(req.params.quizId);
+    const {quiz, body} = req;
 
-    const quiz = models.quiz.findById(quizId);
+    quiz.question = body.question;
+    quiz.answer = body.answer;
 
-    if (quiz) {
-        quiz.question = req.body.question;
-        quiz.answer = req.body.answer;
-
-        models.quiz.update(quiz);
-
-        res.redirect('/quizzes/' + quizId);
-    } else {
-        next(new Error('There is no quiz with id=' + quizId));
-    }
+    quiz.save({fields: ["question", "answer"]})
+    .then(quiz => {
+        req.flash('success', 'Quiz edited successfully.');
+        res.redirect('/quizzes/' + quiz.id);
+    })
+    .catch(Sequelize.ValidationError, error => {
+        req.flash('error', 'There are errors in the form:');
+        error.errors.forEach(({message}) => req.flash('error', message));
+        res.render('quizzes/edit', {quiz});
+    })
+    .catch(error => {
+        req.flash('error', 'Error editing the Quiz: ' + error.message);
+        next(error);
+    });
 };
 
 
 // DELETE /quizzes/:quizId
 exports.destroy = (req, res, next) => {
 
-    const quizId = Number(req.params.quizId);
-
-    const quiz = models.quiz.findById(quizId);
-
-    if (quiz) {
-        models.quiz.destroy(quiz);
-
+    req.quiz.destroy()
+    .then(() => {
+        req.flash('success', 'Quiz deleted successfully.');
         res.redirect('/quizzes');
-    } else {
-        next(new Error('There is no quiz with id=' + quizId));
-    }
+    })
+    .catch(error => {
+        req.flash('error', 'Error deleting the Quiz: ' + error.message);
+        next(error);
+    });
 };
 
 
 // GET /quizzes/:quizId/play
 exports.play = (req, res, next) => {
 
-    const answer = req.query.answer || '';
+    const {quiz, query} = req;
 
-    const quizId = Number(req.params.quizId);
+    const answer = query.answer || '';
 
-    const quiz = models.quiz.findById(quizId);
-
-    if (quiz) {
-        res.render('quizzes/play', {
-            quiz: quiz,
-            answer: answer
-        });
-    } else {
-        next(new Error('There is no quiz with id=' + quizId));
-    }
+    res.render('quizzes/play', {
+        quiz,
+        answer
+    });
 };
 
 
 // GET /quizzes/:quizId/check
 exports.check = (req, res, next) => {
 
-    const answer = req.query.answer || "";
+    const {quiz, query} = req;
 
-    const quizId = Number(req.params.quizId);
-
-    const quiz = models.quiz.findById(quizId);
-
+    const answer = query.answer || "";
     const result = answer.toLowerCase().trim() === quiz.answer.toLowerCase().trim();
 
-    if (quiz) {
-        res.render('quizzes/result', {
-            quiz: quiz,
-            result: result,
-            answer: answer
-        });
+    res.render('quizzes/result', {
+        quiz,
+        result,
+        answer
+    });
+};
+
+exports.randomplay = (req, res, next) => {
+
+    if (req.session.toBeResolved === undefined) {
+        req.session.score = 0;
+        models.quiz.findAll()
+            .then(quizzes => {
+                req.session.toBeResolved = quizzes;
+                const azar = Math.floor(Math.random() * req.session.toBeResolved.length);
+                const quiz = req.session.toBeResolved[azar];
+                req.session.toBeResolved.splice(azar, 1);
+                const score = req.session.score;
+                res.render('quizzes/random_play', {
+                    quiz: quiz,
+                    score: score
+                })
+            }).catch(error => next(error));
     } else {
-        next(new Error('There is no quiz with id=' + quizId));
-    }
+        const azar = Math.floor(Math.random() * req.session.toBeResolved.length);
+        const quiz = req.session.toBeResolved[azar];
+        req.session.toBeResolved.splice(azar, 1);
+        const score = req.session.score;
+        res.render("quizzes/random_play", {
+            quiz: quiz,
+            score: score
+        });
+    };
+};
+
+exports.randomcheck = (req, res, next) => {
+    
+    const {quiz, query} = req;
+    
+    const answer = query.answer || "";
+    const result = answer.toLowerCase().trim() === quiz.answer.toLowerCase().trim();
+    
+    if(result){
+        req.session.score++;
+        if(req.session.toBeResolved.length === 0){
+            req.session.toBeResolved === undefined;
+            res.render('quizzes/random_nomore', {
+            score: req.session.score
+            })
+        } else {
+            res.render('quizzes/random_result', {
+            answer: answer,
+            score: req.session.score,
+            result: result
+            })
+        }
+    } else {
+        req.session.toBeResolved === undefined;
+        res.render('quizzes/random_result', {
+        answer: answer,
+        score: req.session.score,
+        result: result
+        });
+    };
 };
